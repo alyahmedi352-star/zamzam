@@ -535,6 +535,21 @@ function softRender(){
 }
 document.addEventListener('focusout',()=>{ if(deferRender){ deferRender=false; setTimeout(render,0); } });
 
+const MEDIA_MAX=740000;
+function mediaCol(){ return stateRef? stateRef.collection('media') : null; }
+async function cloudPut(id,blob){
+  if(!remoteOn() || !blob) return;
+  if(blob.size>MEDIA_MAX){ toast('الملف كبير، فيُحفظ على هذا الجهاز فقط. للفيديو ضعي رابط يوتيوب أو Drive'); return; }
+  try{
+    const d=await new Promise((ok,no)=>{ const r=new FileReader(); r.onload=()=>ok(r.result); r.onerror=no; r.readAsDataURL(blob); });
+    await mediaCol().doc(id).set({d, type:blob.type||'', at:Date.now(), uid:fUser.uid});
+  }catch(e){ console.error(e); toast('تعذّر رفع الصورة إلى السحابة'); }
+}
+async function cloudGet(id){
+  if(!remoteOn()) return null;
+  try{ const snap=await mediaCol().doc(id).get(); if(!snap.exists) return null; return await (await fetch(snap.data().d)).blob(); }catch(e){ return null; }
+}
+function cloudDel(id){ if(remoteOn()) mediaCol().doc(id).delete().catch(()=>{}); }
 function loadJs(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 async function initRemote(){
   setSync(syncState);
@@ -578,7 +593,7 @@ function onUser(u){
   fUser=u||null; NOTES=[]; paintBadge();
   if(!fUser){ setSync('out'); return; }
   if(!MEMBERS[(fUser.email||'').toLowerCase()]){ toast('هذا الحساب غير مضاف إلى المنصة'); fbAuth.signOut(); return; }
-  setSync('busy'); booted=false;
+  setSync('busy'); booted=false; setTimeout(()=>{ try{ render(); }catch(e){} },1200);
   unState = stateRef.onSnapshot(snap=>{
     if(snap.metadata.hasPendingWrites) return;
     if(!snap.exists){ if(me().role==='teacher') pushRemote(); else setSync('on'); booted=true; return; }
@@ -1173,6 +1188,11 @@ const MEDIA={db:null,
   put(id,blob){ try{ navigator.storage&&navigator.storage.persist&&navigator.storage.persist(); }catch(e){} return this.tx('readwrite',st=>st.put(blob,id)); },
   get(id){ return this.tx('readonly',st=>st.get(id)); },
   del(id){ return this.tx('readwrite',st=>st.delete(id)); }};
+/* مزامنة الصور عبر السحابة: كل صورة تُحفظ أيضًا في Firebase فتظهر عند المشرفة وعلى أي جهاز */
+{ const _put=MEDIA.put.bind(MEDIA), _get=MEDIA.get.bind(MEDIA), _del=MEDIA.del.bind(MEDIA);
+  MEDIA.put=async(id,blob)=>{ const r=await _put(id,blob); cloudPut(id,blob); return r; };
+  MEDIA.get=async id=>{ let b=null; try{ b=await _get(id); }catch(e){} if(b) return b; b=await cloudGet(id); if(b){ try{ await _put(id,b); }catch(e){} } return b; };
+  MEDIA.del=async id=>{ cloudDel(id); return _del(id); }; }
 document.addEventListener('click',async e=>{ const a=e.target.closest('a[data-local]'); if(!a) return; e.preventDefault();
   try{ const b=await MEDIA.get(a.dataset.local); if(!b){ toast('الملف غير موجود على هذا الجهاز'); return; } const u=URL.createObjectURL(b); window.open(u,'_blank')||(location.href=u); setTimeout(()=>URL.revokeObjectURL(u),60000); }catch(err){ toast('تعذّر فتح الملف'); } });
 const localAttr=x=>x.local&&!x.url?` data-local="${esc(x.local)}"`:'';
