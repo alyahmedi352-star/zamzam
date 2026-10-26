@@ -357,8 +357,9 @@ dialog::backdrop{background:rgba(10,20,35,.42)}
   <p class="muted">مدرسة مزن المعرفة للتعليم الأساسي (١-٤)</p>
   <p class="gate-wait" id="gateWait">جارٍ التحقق…</p>
   <form id="gateForm" hidden>
-    <div class="field"><label for="g_u">اسم المستخدم</label><input class="input" id="g_u" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" dir="ltr" required></div>
-    <div class="field"><label for="g_p">كلمة المرور</label><input class="input" id="g_p" type="password" autocomplete="current-password" dir="ltr" required></div>
+    <div class="field"><label for="g_u">اسم المستخدم</label><input class="input" id="g_u" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" dir="ltr" lang="en" placeholder="teacher" required></div>
+    <div class="field"><label for="g_p">كلمة المرور</label><input class="input" id="g_p" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" dir="ltr" required>
+      <label class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" id="g_show" style="margin:0"> إظهار كلمة المرور</label></div>
     <p class="sync-err" id="g_err" role="alert"></p>
     <button type="submit" class="btn primary" id="g_btn">دخول</button>
   </form>
@@ -492,7 +493,12 @@ const MEMBERS = {
   'teacher@field1.app':    {name:'أ. زمزم النوفلية', role:'teacher'},
   'supervisor@field1.app': {name:'المشرفة', role:'supervisor'},
 };
-const toEmail = u => { u=String(u||'').trim().toLowerCase(); return u.includes('@')? u : u+'@'+DOMAIN; };
+/* تنظيف ما يُكتب في الدخول: الأرقام العربية ← إنجليزية، حذف المسافات والعلامات الخفية،
+   وتحويل ما كُتب بلوحة المفاتيح العربية بالخطأ (مثل «فثشؤاثق») إلى حروفه الإنجليزية في اسم المستخدم */
+const AR_KB={'ض':'q','ص':'w','ث':'e','ق':'r','ف':'t','غ':'y','ع':'u','ه':'i','خ':'o','ح':'p','ش':'a','س':'s','ي':'d','ب':'f','ل':'g','ا':'h','ت':'j','ن':'k','م':'l','ئ':'z','ء':'x','ؤ':'c','ر':'v','ى':'n','ة':'m','ظ':'/','ط':"'",'ذ':'`','د':']','ج':'[','و':',','ز':'.','أ':'h','إ':'h','آ':'h','لا':'b'};
+const normDigits = v => String(v||'').replace(/[\u0660-\u0669]/g,d=>d.charCodeAt(0)-0x660).replace(/[\u06F0-\u06F9]/g,d=>d.charCodeAt(0)-0x6F0).replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,'');
+const normPass = v => normDigits(v).trim();
+const toEmail = u => { u=normDigits(u).trim().toLowerCase().replace(/\s+/g,''); u=u.replace(/لا/g,'b').replace(/[\u0600-\u06FF]/g,c=>AR_KB[c]||c); return u.includes('@')? u : u+'@'+DOMAIN; };
 const ROLE_T = {teacher:'المعلمة', supervisor:'المشرفة'};
 const FB_V = '10.12.2';
 const KEY_SEEN = 'muzn-field1-notes-seen';
@@ -577,13 +583,14 @@ function showGate(mode, msg){
   if(mode==='login') setTimeout(()=>{ try{ $('#g_u').focus(); }catch(e){} },50);
 }
 $('#gateRetry').onclick=()=>location.reload();
+$('#g_show').onchange=e=>{ $('#g_p').type=e.target.checked?'text':'password'; };
 $('#gateForm').onsubmit=e=>{
   e.preventDefault();
   const btn=$('#g_btn'); btn.disabled=true; btn.textContent='جارٍ الدخول…'; $('#g_err').textContent='';
-  fbAuth.signInWithEmailAndPassword(toEmail($('#g_u').value), $('#g_p').value)
+  fbAuth.signInWithEmailAndPassword(toEmail($('#g_u').value), normPass($('#g_p').value))
     .then(()=>{ $('#g_p').value=''; })
     .catch(err=>{ const c=err&&err.code||'';
-      $('#g_err').textContent = /invalid|wrong-password|user-not-found|missing-email/.test(c)?'اسم المستخدم أو كلمة المرور غير صحيح.':
+      $('#g_err').textContent = /invalid-api-key|operation-not-allowed|app-not-authorized|unauthorized-domain/.test(c)?'خطأ في إعداد المنصة ('+c+'). أرسلي هذه الرسالة لمن أعدّ المنصة.':/user-disabled/.test(c)?'هذا الحساب موقوف.':/invalid|wrong-password|user-not-found|missing-email/.test(c)?'اسم المستخدم أو كلمة المرور غير صحيح. تأكدي من الحروف الكبيرة والصغيرة في كلمة المرور.':
         /too-many/.test(c)?'محاولات كثيرة، انتظري قليلًا ثم أعيدي المحاولة.':/network/.test(c)?'لا يوجد اتصال بالإنترنت.':'تعذّر الدخول: '+c; })
     .finally(()=>{ btn.disabled=false; btn.textContent='دخول'; });
 };
@@ -631,11 +638,11 @@ function syncDialog(){
         <p class="sync-err" id="lg_err"></p>`,
       onSave:f=>{
         const btn=f.querySelector('[type=submit]'); btn.disabled=true; btn.textContent='جارٍ الدخول…';
-        fbAuth.signInWithEmailAndPassword(toEmail(f.elements.e.value), f.elements.p.value)
+        fbAuth.signInWithEmailAndPassword(toEmail(f.elements.e.value), normPass(f.elements.p.value))
           .then(()=>{ dlg.close(); toast('مرحبًا '+me().name); })
           .catch(err=>{ btn.disabled=false; btn.textContent='دخول';
             const c=err&&err.code||''; $('#lg_err').textContent =
-              /invalid|wrong-password|user-not-found|missing-email/.test(c)?'اسم المستخدم أو كلمة المرور غير صحيح.':
+              /invalid-api-key|operation-not-allowed|app-not-authorized|unauthorized-domain/.test(c)?'خطأ في إعداد المنصة ('+c+'). أرسلي هذه الرسالة لمن أعدّ المنصة.':/user-disabled/.test(c)?'هذا الحساب موقوف.':/invalid|wrong-password|user-not-found|missing-email/.test(c)?'اسم المستخدم أو كلمة المرور غير صحيح. تأكدي من الحروف الكبيرة والصغيرة في كلمة المرور.':
               /too-many/.test(c)?'محاولات كثيرة، انتظري قليلًا ثم أعيدي المحاولة.':
               /network/.test(c)?'لا يوجد اتصال بالإنترنت.':'تعذّر الدخول: '+c; });
         return false;
